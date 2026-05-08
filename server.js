@@ -60,23 +60,27 @@ app.get('/', (req, res) => {
  * Ingestion : Reçoit les octets de l'Agent et les diffuse au Superviseur
  */
 app.post('/ingest', (req, res) => {
+    const chunk = req.body;
     const tempFilePath = path.join(STORAGE_DIR, 'sandbox_test.webm');
-    
-    // 1. Sauvegarde disque pour le futur replay
-    fs.appendFileSync(tempFilePath, req.body);
 
-    // 2. Gestion de l'en-tête pour le direct
+    // 1. On mémorise le tout premier morceau (le header) pour les nouveaux arrivants
     if (!sessionHeader) {
-        sessionHeader = req.body;
-        console.log("💎 Premier chunk (header) capturé et mémorisé.");
+        sessionHeader = chunk;
+        console.log("💎 Header capturé");
     }
 
-    // 3. Diffusion instantanée à tous les superviseurs connectés
-    io.emit('live-chunk', req.body);
+    // 2. On envoie immédiatement le morceau au superviseur (via RAM, super rapide)
+    io.emit('live-chunk', chunk);
 
+    // 3. On libère le téléphone tout de suite pour qu'il puisse envoyer le morceau suivant
     res.sendStatus(200);
-});
 
+    // 4. On écrit sur le disque en mode "non-bloquant" (Asynchrone)
+    // C'est ce qui évite les saccades sur Render
+    fs.appendFile(tempFilePath, chunk, (err) => {
+        if (err) console.error("⚠️ Erreur écriture disque:", err);
+    });
+});
 /**
  * Nettoyage : Réinitialise la session avant un nouvel enregistrement
  */
@@ -99,16 +103,19 @@ app.post('/finalize', (req, res) => {
     const finalPath = path.join(STORAGE_DIR, finalFileName);
 
     if (fs.existsSync(tempPath)) {
+        // On renomme le fichier temporaire en archive finale
         fs.renameSync(tempPath, finalPath);
+        
+        // On génère l'URL pour le replay
         const videoUrl = `https://${req.get('host')}/videos/${finalFileName}`;
         
-        // On réinitialise aussi l'en-tête ici par sécurité
+        // On réinitialise l'en-tête pour la prochaine session
         sessionHeader = null;
         
         console.log(`📦 Archive créée : ${videoUrl}`);
         res.json({ url: videoUrl });
     } else {
-        res.status(404).json({ error: "Aucun flux trouvé" });
+        res.status(404).json({ error: "Aucun flux à finaliser" });
     }
 });
 

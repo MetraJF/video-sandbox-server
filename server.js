@@ -8,91 +8,71 @@ const cors = require('cors');
 const app = express();
 const server = http.createServer(app);
 
-// --- CONFIGURATION ---
-
-// Initialisation de Socket.io avec CORS ouvert pour ton interface Superviseur
+// Configuration Socket.io pour le direct
 const io = new Server(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    }
+    cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
 app.use(cors());
 
-// Middleware pour recevoir les données binaires brutes (Blob) du téléphone
+// Augmentation du buffer pour stabiliser la réception des gros morceaux
 app.use(express.raw({ type: 'application/octet-stream', limit: '100mb' }));
 
-// Dossier de stockage pour les vidéos enr360
 const STORAGE_DIR = path.join(__dirname, 'storage');
 if (!fs.existsSync(STORAGE_DIR)) {
     fs.mkdirSync(STORAGE_DIR, { recursive: true });
 }
 
-// Variable pour stocker l'en-tête (header) de la vidéo et garantir le décodage live
+// Variable critique pour mémoriser l'en-tête de la vidéo
 let sessionHeader = null;
 
-// --- LOGIQUE TEMPS RÉEL (SOCKET.IO) ---
-
+// --- GESTION DES CONNEXIONS LIVE ---
 io.on('connection', (socket) => {
-    console.log(`🔌 Nouveau superviseur connecté : ${socket.id}`);
-    
-    // Si un direct est déjà en cours, on envoie immédiatement l'en-tête au nouveau venu
+    console.log(`🔌 Superviseur connecté : ${socket.id}`);
     if (sessionHeader) {
         socket.emit('live-chunk', sessionHeader);
     }
-
-    socket.on('disconnect', () => {
-        console.log(`❌ Superviseur déconnecté`);
-    });
 });
 
 // --- ROUTES API ---
 
-/**
- * Accueil : Test de santé du serveur
- */
 app.get('/', (req, res) => {
-    res.send('🚀 Serveur enr360 (Live & Archive) est opérationnel.');
+    res.send('🚀 Serveur enr360 Performance Edition Opérationnel');
 });
 
 /**
- * Ingestion : Reçoit les octets de l'Agent et les diffuse au Superviseur
+ * INGESTION : Priorité au Direct, Écriture en arrière-plan
  */
 app.post('/ingest', (req, res) => {
+    const chunk = req.body;
     const tempFilePath = path.join(STORAGE_DIR, 'sandbox_test.webm');
-    
-    // 1. Sauvegarde disque pour le futur replay
-    fs.appendFileSync(tempFilePath, req.body);
 
-    // 2. Gestion de l'en-tête pour le direct
+    // 1. GESTION DU HEADER (Pour le décodage immédiat)
     if (!sessionHeader) {
-        sessionHeader = req.body;
-        console.log("💎 Premier chunk (header) capturé et mémorisé.");
+        sessionHeader = chunk;
+        console.log("💎 En-tête de session capturé.");
     }
 
-    // 3. Diffusion instantanée à tous les superviseurs connectés
-    io.emit('live-chunk', req.body);
+    // 2. DIFFUSION LIVE (Instantane via RAM)
+    io.emit('live-chunk', chunk);
 
+    // 3. RÉPONSE IMMÉDIATE (On libère le téléphone tout de suite)
     res.sendStatus(200);
+
+    // 4. ÉCRITURE DISQUE ASYNCHRONE (Ne bloque pas le serveur)
+    fs.appendFile(tempFilePath, chunk, (err) => {
+        if (err) console.error("⚠️ Erreur disque (non bloquante):", err);
+    });
 });
 
-/**
- * Nettoyage : Réinitialise la session avant un nouvel enregistrement
- */
 app.delete('/api/clear-video', (req, res) => {
     const tempFilePath = path.join(STORAGE_DIR, 'sandbox_test.webm');
-    if (fs.existsSync(tempFilePath)) {
-        fs.unlinkSync(tempFilePath);
-    }
-    sessionHeader = null; // Très important : on vide l'en-tête précédent
-    console.log("🧹 Session nettoyée, prêt pour un nouvel enr360.");
+    if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+    sessionHeader = null; 
+    console.log("🧹 Session réinitialisée.");
     res.sendStatus(200);
 });
 
-/**
- * Finalisation : Archive la vidéo une fois la visite terminée
- */
 app.post('/finalize', (req, res) => {
     const tempPath = path.join(STORAGE_DIR, 'sandbox_test.webm');
     const finalFileName = `enr360_${Date.now()}.webm`;
@@ -101,26 +81,16 @@ app.post('/finalize', (req, res) => {
     if (fs.existsSync(tempPath)) {
         fs.renameSync(tempPath, finalPath);
         const videoUrl = `https://${req.get('host')}/videos/${finalFileName}`;
-        
-        // On réinitialise aussi l'en-tête ici par sécurité
         sessionHeader = null;
-        
-        console.log(`📦 Archive créée : ${videoUrl}`);
         res.json({ url: videoUrl });
     } else {
-        res.status(404).json({ error: "Aucun flux trouvé" });
+        res.status(404).json({ error: "Flux introuvable" });
     }
 });
 
-/**
- * Lecture : Accès public aux archives vidéo
- */
 app.use('/videos', express.static(STORAGE_DIR));
 
-// --- DÉMARRAGE ---
-
 const port = process.env.PORT || 3000;
-// Note : On utilise server.listen (http) et non app.listen pour que Socket.io fonctionne
 server.listen(port, '0.0.0.0', () => {
-    console.log(`✅ Serveur enr360 actif sur le port ${port}`);
+    console.log(`✅ Serveur prêt sur le port ${port}`);
 });

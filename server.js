@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
+const os = require('os'); // Ajout de l'import OS
 
 const app = express();
 const server = http.createServer(app);
@@ -23,8 +24,8 @@ app.use(cors());
 // Middleware pour recevoir les données binaires brutes (Blob) du téléphone
 app.use(express.raw({ type: 'application/octet-stream', limit: '100mb' }));
 
-// Dossier de stockage pour les vidéos enr360
-const STORAGE_DIR = path.join(__dirname, 'storage');
+// Dossier de stockage pour les vidéos enr360 pointant sur /tmp
+const STORAGE_DIR = path.join(os.tmpdir(), 'enr360_storage');
 if (!fs.existsSync(STORAGE_DIR)) {
     fs.mkdirSync(STORAGE_DIR, { recursive: true });
 }
@@ -76,11 +77,11 @@ app.post('/ingest', (req, res) => {
     res.sendStatus(200);
 
     // 4. On écrit sur le disque en mode "non-bloquant" (Asynchrone)
-    // C'est ce qui évite les saccades sur Render
     fs.appendFile(tempFilePath, chunk, (err) => {
         if (err) console.error("⚠️ Erreur écriture disque:", err);
     });
 });
+
 /**
  * Nettoyage : Réinitialise la session avant un nouvel enregistrement
  */
@@ -127,7 +128,6 @@ app.use('/videos', express.static(STORAGE_DIR));
 // --- DÉMARRAGE ---
 
 const port = process.env.PORT || 3000;
-// Note : On utilise server.listen (http) et non app.listen pour que Socket.io fonctionne
 server.listen(port, '0.0.0.0', () => {
     console.log(`✅ Serveur enr360 actif sur le port ${port}`);
 });

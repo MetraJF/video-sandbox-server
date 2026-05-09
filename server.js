@@ -9,7 +9,7 @@ const os = require('os'); // Ajout de l'import OS
 const app = express();
 const server = http.createServer(app);
 
-// --- CONFIGURATION JF---
+// --- CONFIGURATION JF2---
 
 // Initialisation de Socket.io avec CORS ouvert pour ton interface Superviseur
 const io = new Server(server, {
